@@ -8,12 +8,17 @@ Ne mettez pas tout dans un seul fichier. Une structure "Modèle-Vue-Contrôleur"
 
 ---
 
-## 2. Configuration de l'environnement
-1.  Ouvrez PyCharm et créez un nouveau projet.
-2.  Allez dans **Terminal** (en bas de PyCharm) et installez les dépendances :
-    ```bash
-    pip install customtkinter scipy sounddevice soundfile numpy
-    ```
+## 2. Installé les bibliothèques sur la VM
+
+sudo apt update
+
+sudo apt install python3-tk
+
+sudo apt install libportaudio2
+
+### 2.1 INstallé le venv
+
+pip install -r requirements.txt
 
 ---
 
@@ -21,8 +26,6 @@ Ne mettez pas tout dans un seul fichier. Une structure "Modèle-Vue-Contrôleur"
 Avant de faire des curseurs brillants, assurez-vous de pouvoir lire un son et lui appliquer un filtre statique. 
 
 **Le concept clé :** Vous devez utiliser un "callback" avec `sounddevice`. Au lieu de lire tout le fichier d'un coup, on lit des petits blocs de données (chunks) auxquels on applique l'équation de récurrence du filtre avant de les envoyer aux haut-parleurs.
-
-
 
 ---
 
