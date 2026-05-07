@@ -1,3 +1,5 @@
+# audioengine.py
+
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
@@ -6,54 +8,68 @@ import numpy as np
 class AudioEngine:
     def __init__(self):
         self.data = None
-        self.fs = None
-        self.current_frame = 0
+        self.fs = 44100  # Valeur par défaut
         self.stream = None
+        self.current_frame = 0
         self.volume = 1.0
         self.is_playing = False
 
     def load_file(self, file_path):
-        # Lecture du fichier
         self.data, self.fs = sf.read(file_path, dtype='float32')
+        print(f"Fréquence d'échantillonnage du fichier : {self.fs} Hz")
+        if len(self.data.shape) == 1:  # Mono -> Stéréo
+            self.data = np.column_stack((self.data, self.data))
         self.current_frame = 0
 
     def callback(self, outdata, frames, time, status):
-        if not self.is_playing:
+        if status:
+            print(status)
+        if not self.is_playing or self.data is None:
             outdata.fill(0)
             return
 
-        # Calcul des indices pour le bloc de données
         chunksize = min(len(self.data) - self.current_frame, frames)
-
-        # Extraction du bloc
         samples = self.data[self.current_frame: self.current_frame + chunksize]
 
-        # Application du volume (et futur emplacement des filtres !)
+        # Traitement du volume
         processed_samples = samples * self.volume
 
-        # Remplissage du buffer de sortie
         if chunksize < frames:
             outdata[:chunksize] = processed_samples
             outdata[chunksize:] = 0
-            self.is_playing = False  # Fin du fichier
+            self.is_playing = False
             self.current_frame = 0
         else:
             outdata[:] = processed_samples
             self.current_frame += chunksize
 
     def start(self):
-        if self.data is not None:
+        if self.data is None:
+            print("Erreur : Aucun fichier chargé.")
+            return
+
+        try:
+            # Sécurité : Toujours fermer avant de réouvrir
+            if self.stream is not None:
+                self.stream.stop()
+                self.stream.close()
+
+            # Utiliser explicitement le device 'default' ou 'pulse'
+            # pour éviter que sounddevice ne cherche à interroger le hardware direct (hw:0,0)
+            self.stream = sd.OutputStream(
+                samplerate=self.fs,
+                channels=2,
+                callback=self.callback,
+                device='default', # FORCE l'utilisation du serveur audio Debian
+                blocksize=2048,   # Taille intermédiaire pour limiter l'underflow
+                latency='high'    # Crucial sur VM
+            )
             self.is_playing = True
-            if self.stream is None:
-                self.stream = sd.OutputStream(
-                    samplerate=self.fs,
-                    channels=self.data.shape[1] if len(self.data.shape) > 1 else 1,
-                    callback=self.callback
-                )
-                self.stream.start()
+            self.stream.start()
+        except Exception as e:
+            print(f"La carte son a rejeté la connexion : {e}")
 
     def stop(self):
         self.is_playing = False
-
-    def set_volume(self, value):
-        self.volume = float(value)
+        if self.stream:
+            self.stream.stop()
