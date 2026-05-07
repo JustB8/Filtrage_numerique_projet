@@ -1,9 +1,11 @@
 # gui.py
 
 import customtkinter as ctk
+from tkinter import filedialog
+import os
 
 class AudioVisualApp(ctk.CTk):
-    def __init__(self):
+    def __init__(self, audio_engine):
         super().__init__()
 
         self.title("Application d'application de filtre à appliquer sur un signal sonore")
@@ -57,6 +59,16 @@ class AudioVisualApp(ctk.CTk):
 
         for name, default_val in filters_config:
             self.add_filter_row(name, default_val)
+
+        self.audio_engine = audio_engine
+
+        # Bouton Ajouter un son
+        self.btn_import = ctk.CTkButton(
+            self,
+            border_spacing=20,
+            text="Ajouter un son",
+            command=self.import_audio
+        )
 
     def add_filter_row(self, name, default_val):
         row_frame = ctk.CTkFrame(self.filter_frame)
@@ -125,6 +137,17 @@ class AudioVisualApp(ctk.CTk):
     def update_volume_label(self, value):
         self.volume_label.configure(text=f"Volume : {int(value * 100)}%")
 
+    def import_audio(self):
+        print("Bouton cliqué !")  # Si ça n'affiche rien ici, le souci est le bouton
+        file_path = filedialog.askopenfilename(
+            parent=self,  # On lui dit qui est le patron
+            title="Sélectionner un fichier audio",
+            filetypes=[("Audio Files", "*.mp3 *.wav *.flac")]
+        )
+        if file_path:
+            print(f"Chargement de : {file_path}")
+            # On envoie le chemin au moteur audio pour traitement
+            self.audio_engine.load_file(file_path)
 
 if __name__ == "__main__":
     app = AudioVisualApp()

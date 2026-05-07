@@ -16,6 +16,9 @@ sudo apt install python3-tk
 
 sudo apt install libportaudio2
 
+sudo apt install libsndfile1 libsndfile1-dev
+pip install --upgrade soundfile
+
 ### 2.1 INstallé le venv
 
 pip install -r requirements.txt
