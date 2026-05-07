@@ -60,9 +60,9 @@ class AudioEngine:
                 samplerate=self.fs,
                 channels=2,
                 callback=self.callback,
-                device='default', # FORCE l'utilisation du serveur audio Debian
-                blocksize=2048,   # Taille intermédiaire pour limiter l'underflow
-                latency='high'    # Crucial sur VM
+                device=None,      # Laisse Windows gérer le périphérique par défaut
+                blocksize=2048,
+                latency='high'
             )
             self.is_playing = True
             self.stream.start()

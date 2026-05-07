@@ -136,7 +136,7 @@ class AudioVisualApp(ctk.CTk):
 
     def update_volume_label(self, value):
         self.volume_label.configure(text=f"Volume : {int(value * 100)}%")
-        self.engine.set_volume(value)
+        self.engine.volume = float(value)
 
 
 if __name__ == "__main__":
