@@ -1,6 +1,7 @@
 # gui.py
 
 import customtkinter as ctk
+from audio_engine import AudioEngine
 from tkinter import filedialog
 import os
 
@@ -8,6 +9,7 @@ import os
 class AudioVisualApp(ctk.CTk):
     def __init__(self):
         super().__init__()
+        self.engine = AudioEngine()
 
         self.title("Application de filtrage numérique")
         self.geometry("1100x540")
@@ -74,6 +76,7 @@ class AudioVisualApp(ctk.CTk):
 
         if file_selected:
             self.file_path = file_selected
+            self.engine.load_file(file_selected)
             # Mise à jour de l'affichage (nom du fichier uniquement)
             file_name = os.path.basename(file_selected)
             self.file_label.configure(text=f"Chargé : {file_name}", text_color="#2ecc71")
@@ -126,11 +129,14 @@ class AudioVisualApp(ctk.CTk):
         self.is_playing = not self.is_playing
         if self.is_playing:
             self.play_pause_button.configure(text="Pause", fg_color="#e67e22")
+            self.engine.start()
         else:
             self.play_pause_button.configure(text="Play", fg_color="#2ecc71")
+            self.engine.stop()
 
     def update_volume_label(self, value):
         self.volume_label.configure(text=f"Volume : {int(value * 100)}%")
+        self.engine.set_volume(value)
 
 
 if __name__ == "__main__":
