@@ -18,8 +18,8 @@ class AudioVisualApp(ctk.CTk):
         self.geometry("1100x600")
 
         self.is_playing = False
-        self.file_path = None 
-        
+        self.file_path = None
+
         # Dictionnaire pour stocker l'état des filtres (activé/fréquence)
         # Utile pour faire le lien avec audio_engine.py
         self.filters_state = {}
@@ -56,7 +56,7 @@ class AudioVisualApp(ctk.CTk):
         # --- Zone Centrale : Filtres ---
         self.filter_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.filter_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=10)
-        
+
         self.filter_frame_title = ctk.CTkLabel(self.filter_frame, text="RÉGLAGES DES FILTRES",
                                                font=ctk.CTkFont(size=22, weight="bold"))
         self.filter_frame_title.pack(pady=(20, 30))
@@ -120,7 +120,7 @@ class AudioVisualApp(ctk.CTk):
         is_active = self.filters_state[name]["checkbox"].get()
         self.filters_state[name]["active"] = bool(is_active)
         # Appel vers audio_engine (à implémenter dans audio_engine.py)
-        # self.engine.update_filter_status(name, is_active)
+        self.engine.update_filter_status(name, is_active)
         print(f"Filtre {name}: {'ON' if is_active else 'OFF'}")
 
     def update_filter_freq(self, name, value, entry_var):
@@ -130,7 +130,7 @@ class AudioVisualApp(ctk.CTk):
         if entry_var.get() != str(freq):
             entry_var.set(str(freq))
         # Appel vers audio_engine
-        # self.engine.set_filter_freq(name, freq)
+        self.engine.set_filter_freq(name, freq)
 
     def update_slider_from_entry(self, name, slider, entry_var):
         """Met à jour le slider et l'état via l'entrée texte"""
@@ -141,7 +141,7 @@ class AudioVisualApp(ctk.CTk):
             if 20 <= value <= 20000:
                 slider.set(value)
                 self.filters_state[name]["freq"] = value
-                # self.engine.set_filter_freq(name, value)
+                self.engine.set_filter_freq(name, value)
         except ValueError:
             pass
 
