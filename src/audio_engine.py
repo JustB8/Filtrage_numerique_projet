@@ -4,10 +4,22 @@ import sounddevice as sd
 import soundfile as sf
 import numpy as np
 from scipy import signal
+import os
 
+class Track:
+    def __init__(self, data, fs, name):
+        self.name = name
+        self.data = data
+        self.fs = fs
+        self.current_frame = 0
+        self.volume = 1.0
+        self.is_playing = False
+        self.is_selected = True # Pour la checkbox de gauche
+        self.filters = {} # Filtres spécifiques à cette piste
 
 class AudioEngine:
     def __init__(self):
+        self.tracks = {}
         self.data = None
         self.fs = 44100
         self.stream = None
@@ -71,22 +83,29 @@ class AudioEngine:
             self.filters[name]["freq"] = freq
             self._compute_sos(name)
 
+    def add_track(self, file_path):
+        data, fs = sf.read(file_path, dtype='float32')
+        if len(data.shape) == 1:
+            data = np.column_stack((data, data))
+        name = os.path.basename(file_path)
+        self.tracks[name] = Track(data, fs, name)
+        return name
+
     def callback(self, outdata, frames, time, status):
-        if not self.is_playing or self.data is None:
-            outdata.fill(0)
-            return
-
-        chunksize = min(len(self.data) - self.current_frame, frames)
-        # On travaille sur une copie pour ne pas modifier le fichier original
-        samples = self.data[self.current_frame: self.current_frame + chunksize].copy()
-
-        # Application des filtres actifs en cascade
-        for name, info in self.filters.items():
-            if info["active"] and info["sos"] is not None:
-                # Utilisation de zi pour la continuité du flux
-                samples, info["zi"] = signal.sosfilt(info["sos"], samples, axis=0, zi=info["zi"])
-
-        outdata[:chunksize] = samples * self.volume
+        outdata.fill(0)
+        for name, track in self.tracks.items():
+            if track.is_playing and track.is_selected:
+                chunksize = min(len(track.data) - track.current_frame, frames)
+                samples = track.data[track.current_frame : track.current_frame + chunksize].copy()
+                
+                # Appliquer les filtres de LA piste
+                for f_name, f_info in track.filters.items():
+                    if f_info["active"]:
+                        samples, f_info["zi"] = signal.sosfilt(f_info["sos"], samples, axis=0, zi=f_info["zi"])
+                
+                outdata[:chunksize] += samples * track.volume
+                track.current_frame += chunksize
+                # ... (gestion de la fin de lecture)
 
         if chunksize < frames:
             outdata[chunksize:].fill(0)
