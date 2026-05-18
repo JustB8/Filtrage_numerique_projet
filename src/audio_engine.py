@@ -15,6 +15,10 @@ class AudioEngine:
         self.volume = 1.0
         self.is_playing = False
 
+        # Variables pour l'analyse spectrale en temps réel
+        self.current_chunk_in = None
+        self.current_chunk_out = None
+
         # Configuration des filtres
         self.filters = {
             "Passe-Bas Ordre 1": {"active": False, "freq": 500, "sos": None, "zi": None},
@@ -74,11 +78,19 @@ class AudioEngine:
     def callback(self, outdata, frames, time, status):
         if not self.is_playing or self.data is None:
             outdata.fill(0)
+            self.current_chunk_in = None
+            self.current_chunk_out = None
             return
 
         chunksize = min(len(self.data) - self.current_frame, frames)
         # On travaille sur une copie pour ne pas modifier le fichier original
         samples = self.data[self.current_frame: self.current_frame + chunksize].copy()
+
+        # Sauvegarde du signal d'entrée (stéréo -> mix mono pour la FFT)
+        if chunksize > 0:
+            self.current_chunk_in = np.mean(samples, axis=1)
+        else:
+            self.current_chunk_in = None
 
         # Application des filtres actifs en cascade
         for name, info in self.filters.items():
@@ -86,13 +98,31 @@ class AudioEngine:
                 # Utilisation de zi pour la continuité du flux
                 samples, info["zi"] = signal.sosfilt(info["sos"], samples, axis=0, zi=info["zi"])
 
+        # Sauvegarde du signal filtré (mix mono) avant application du volume global
+        if chunksize > 0:
+            self.current_chunk_out = np.mean(samples, axis=1)
+        else:
+            self.current_chunk_out = None
+
         outdata[:chunksize] = samples * self.volume
 
         if chunksize < frames:
-            outdata[chunksize:].fill(0)
-            self.is_playing = False
+            # 1. On réinitialise le curseur de lecture au début du morceau
             self.current_frame = 0
+            
+            # 2. On calcule combien d'échantillons il manque pour compléter le bloc (le "buffer")
+            missing_frames = frames - chunksize
+            
+            # 3. On prend le début du morceau pour combler le vide
+            loop_samples = self.data[0:missing_frames].copy()
+            
+            # 4. On fusionne la fin et le début du morceau pour avoir un bloc complet
+            samples = np.vstack((samples, loop_samples))
+            
+            # 5. On met à jour le curseur pour le prochain coup de callback
+            self.current_frame = missing_frames
         else:
+            # Avancement normal si on n'est pas à la fin du fichier
             self.current_frame += chunksize
 
     def start(self):
@@ -109,6 +139,8 @@ class AudioEngine:
 
     def stop(self):
         self.is_playing = False
+        self.current_chunk_in = None
+        self.current_chunk_out = None
         if self.stream:
             self.stream.stop()
             self.stream.close()
@@ -118,27 +150,43 @@ class AudioEngine:
         Calcule la réponse en fréquence globale cumulée de tous les filtres actifs.
         Retourne (w, amplitude_db) où w est la fréquence en Hz.
         """
-        # Fréquences d'évaluation (de 20 Hz à Nyquist)
         w_hz = np.logspace(np.log10(20), np.log10(self.fs / 2 - 1), worN)
-        # Conversion en radians/échantillon pour scipy
         w_rad = 2 * np.pi * w_hz / self.fs
-        
-        # Initialisation de la réponse globale à 1 (0 dB partout)
         h_total = np.ones(worN, dtype=complex)
-        
         has_active_filter = False
         
         for name, info in self.filters.items():
             if info["active"] and info["sos"] is not None:
                 has_active_filter = True
-                # Calcul de la réponse pour le filtre SOS actuel
                 _, h = signal.sosfreqz(info["sos"], worN=w_rad)
                 h_total *= h
                 
         if not has_active_filter:
-            # Si aucun filtre n'est coché, on renvoie une ligne plate à 0 dB
             return w_hz, np.zeros(worN)
             
-        # Conversion en décibels, avec une sécurité pour éviter le log(0)
         amplitude_db = 20 * np.log10(np.maximum(np.abs(h_total), 1e-5))
         return w_hz, amplitude_db
+
+    def get_fft_data(self):
+        """
+        Calcule la FFT des blocs audio d'entrée et de sortie courants.
+        Retourne (freqs, fft_in_db, fft_out_db)
+        """
+        # Si pas de données ou moteur arrêté, on renvoie des tableaux vides
+        if self.current_chunk_in is None or self.current_chunk_out is None or len(self.current_chunk_in) < 128:
+            return None, None, None
+
+        n = len(self.current_chunk_in)
+        # Application d'une fenêtre de Hanning pour éviter le repliement spectral
+        window = np.hanning(n)
+        
+        # Calcul des FFT
+        fft_in = np.fft.rfft(self.current_chunk_in * window)
+        fft_out = np.fft.rfft(self.current_chunk_out * window)
+        freqs = np.fft.rfftfreq(n, d=1/self.fs)
+
+        # Conversion en dB avec seuil de sécurité
+        fft_in_db = 20 * np.log10(np.maximum(np.abs(fft_in), 1e-5))
+        fft_out_db = 20 * np.log10(np.maximum(np.abs(fft_out), 1e-5))
+
+        return freqs, fft_in_db, fft_out_db

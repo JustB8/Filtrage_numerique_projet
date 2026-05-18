@@ -20,7 +20,7 @@ class AudioVisualApp(ctk.CTk):
         self.engine = AudioEngine()
 
         self.title("Application de filtrage numérique")
-        self.geometry("1100x750") # Augmentation de la hauteur pour le graphique
+        self.geometry("1100x850") 
 
         self.is_playing = False
         self.file_path = None
@@ -59,8 +59,7 @@ class AudioVisualApp(ctk.CTk):
         self.main_content = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.main_content.grid(row=0, column=1, sticky="nsew", padx=20, pady=10)
         
-        # Configuration interne du contenu principal
-        self.main_content.grid_rowconfigure(1, weight=1) # Le graphique prendra l'espace libre
+        self.main_content.grid_rowconfigure(1, weight=1) 
         self.main_content.grid_columnconfigure(0, weight=1)
 
         # --- Zone Centrale Haut : Réglages des Filtres ---
@@ -72,59 +71,79 @@ class AudioVisualApp(ctk.CTk):
         self.filter_frame_title.pack(pady=(10, 15))
 
         filters_config = [
-            ("Passe-Bas Ordre 1", 500),
-            ("Passe-Haut Ordre 1", 1000),
-            ("Passe-Bas Ordre 2", 500),
-            ("Passe-Haut Ordre 2", 1000),
-            ("Sélecteur (Bandpass)", 2500),
+            ("Passe-Bas Ordre 1", 5000),
+            ("Passe-Haut Ordre 1", 5000),
+            ("Passe-Bas Ordre 2", 5000),
+            ("Passe-Haut Ordre 2", 5000),
+            ("Sélecteur (Bandpass)", 5000),
             ("Réjecteur (Notch)", 5000)
         ]
 
         for name, default_val in filters_config:
             self.add_filter_row(name, default_val)
 
-        # --- Zone Centrale Bas : Graphique Matplotlib ---
-        self.plot_frame = ctk.CTkFrame(self.main_content, fg_color="#242424") # Fond sombre assorti
+        # --- Zone Centrale Bas : Graphiques Matplotlib ---
+        self.plot_frame = ctk.CTkFrame(self.main_content, fg_color="#242424")
         self.plot_frame.grid(row=1, column=0, sticky="nsew", pady=10)
 
-        # Initialisation de la Figure Matplotlib avec un style sombre
         plt.style.use('dark_background')
-        self.fig, self.ax = plt.subplots(figsize=(6, 3), dpi=100)
+        self.fig, (self.ax_bode, self.ax_fft) = plt.subplots(2, 1, figsize=(6, 5), dpi=100)
         self.fig.patch.set_facecolor('#242424')
-        self.ax.set_facecolor('#1e1e1e')
         
-        # Configuration initiale des axes
-        self.ax.set_title("Réponse en fréquence globale (Bode)", fontsize=11, color="white")
-        self.ax.set_xlabel("Fréquence (Hz)", fontsize=9, color="darkgray")
-        self.ax.set_ylabel("Gain (dB)", fontsize=9, color="darkgray")
-        self.ax.set_xscale('log')
-        self.ax.set_xlim(20, 20000)
-        self.ax.set_ylim(-40, 5)
-        self.ax.grid(True, which="both", ls="-", color="#333333")
+        # 1. Configuration de l'axe de la Réponse Fréquentielle (Bode)
+        self.ax_bode.set_facecolor('#1e1e1e')
+        self.ax_bode.set_title("Réponse en fréquence globale (Bode)", fontsize=11, color="white")
+        self.ax_bode.set_ylabel("Gain (dB)", fontsize=9, color="darkgray")
+        self.ax_bode.set_xscale('log')
+        self.ax_bode.set_xlim(20, 20000)
+        self.ax_bode.set_ylim(-40, 5)
+        self.ax_bode.grid(True, which="both", ls="-", color="#333333")
+        self.line_bode, = self.ax_bode.plot([], [], color="#2ecc71", lw=2)
+
+        # 2. Configuration de l'axe du Spectre en BARRES
+        self.num_bands = 128  # Nombre de barres d'égaliseur pour l'affichage
+        self.ax_fft.set_facecolor('#1e1e1e')
+        self.ax_fft.set_title("Spectre de l'audio (Bandes de fréquences)", fontsize=11, color="white")
+        self.ax_fft.set_xlabel("Fréquence (Hz) - Échelle Log", fontsize=9, color="darkgray")
+        self.ax_fft.set_ylabel("Amplitude (dB)", fontsize=9, color="darkgray")
+        self.ax_fft.set_xscale('log')
+        self.ax_fft.set_xlim(20, 20000)
+        
+        # AJUSTEMENT : Hausse de la limite à +20 dB pour voir les amplitudes les plus hautes sans coupure
+        self.ax_fft.set_ylim(-60, 60) 
+        self.ax_fft.grid(True, which="both", ls="-", color="#333333")
+        
+        # Génération de fréquences initiales espacées de manière logarithmique pour positionner les barres
+        self.bar_freqs = np.logspace(np.log10(20), np.log10(20000), self.num_bands)
+        # Calcul de largeurs proportionnelles à l'échelle logarithmique pour éviter que les barres s'entremêlent
+        widths = self.bar_freqs * 0.05 
+
+        # Initialisation des containers de barres (Placées à la valeur plancher de -60 dB)
+        self.bars_in = self.ax_fft.bar(self.bar_freqs, np.zeros(self.num_bands), width=widths, 
+                                       color="#e74c3c", alpha=0.6, label="Original (Gabarit)", bottom=-60)
+        self.bars_out = self.ax_fft.bar(self.bar_freqs, np.zeros(self.num_bands), width=widths, 
+                                        color="#3498db", alpha=0.7, label="Modifié", bottom=-60)
+        self.ax_fft.legend(loc="upper right", fontsize=8, framealpha=0.5)
+
         self.fig.tight_layout()
 
-        # Ligne vide qui sera mise à jour
-        self.line, = self.ax.plot([], [], color="#2ecc71", lw=2)
-
-        # Intégration de la figure dans CustomTkinter
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_frame)
         self.canvas.get_tk_widget().pack(fill="both", expand=True, padx=5, pady=5)
         
-        # Premier rendu du graphique
-        self.update_plot()
+        self.update_bode_plot()
+        self.update_live_fft()
 
     def import_file(self):
         file_selected = filedialog.askopenfilename(
             title="Sélectionner un fichier audio",
             filetypes=(("Fichiers WAV", "*.wav"), ("Tous les fichiers", "*.*"))
         )
-
         if file_selected:
             self.file_path = file_selected
             self.engine.load_file(file_selected)
             file_name = os.path.basename(file_selected)
             self.file_label.configure(text=f"Chargé : {file_name}", text_color="#2ecc71")
-            self.update_plot() # Recalculer si la fréquence d'échantillonnage change
+            self.update_bode_plot()
 
     def add_filter_row(self, name, default_val):
         row_frame = ctk.CTkFrame(self.filter_frame)
@@ -157,7 +176,7 @@ class AudioVisualApp(ctk.CTk):
         is_active = self.filters_state[name]["checkbox"].get()
         self.filters_state[name]["active"] = bool(is_active)
         self.engine.update_filter_status(name, is_active)
-        self.update_plot() # <--- Mise à jour ici !
+        self.update_bode_plot()
 
     def update_filter_freq(self, name, value, entry_var):
         freq = int(value)
@@ -165,7 +184,7 @@ class AudioVisualApp(ctk.CTk):
         if entry_var.get() != str(freq):
             entry_var.set(str(freq))
         self.engine.set_filter_freq(name, freq)
-        self.update_plot() # <--- Mise à jour ici !
+        self.update_bode_plot()
 
     def update_slider_from_entry(self, name, slider, entry_var):
         try:
@@ -176,19 +195,51 @@ class AudioVisualApp(ctk.CTk):
                 slider.set(value)
                 self.filters_state[name]["freq"] = value
                 self.engine.set_filter_freq(name, value)
-                self.update_plot() # <--- Mise à jour ici !
+                self.update_bode_plot()
         except ValueError:
             pass
 
-    def update_plot(self):
-        """Récupère les données de réponse fréquentielle du moteur et met à jour le tracé."""
+    def update_bode_plot(self):
         frequencies, db_response = self.engine.compute_global_response()
-        
-        # Mise à jour rapide des données de la ligne sans reconstruire tout l'axe
-        self.line.set_data(frequencies, db_response)
-        
-        # Forcer Matplotlib à redessiner le canvas
+        self.line_bode.set_data(frequencies, db_response)
         self.canvas.draw_idle()
+
+    def update_live_fft(self):
+        """Boucle de rafraîchissement appliquant le traitement par barres."""
+        if self.engine.is_playing:
+            freqs, fft_in, fft_out = self.engine.get_fft_data()
+            
+            if freqs is not None:
+                # Regroupement des données FFT linéaires dans nos 64 bandes logarithmiques
+                # Permet de calculer la moyenne d'énergie par bande pour l'affichage en barres
+                indices = np.digitize(freqs, self.bar_freqs)
+                
+                for i in range(self.num_bands):
+                    mask = (indices == i)
+                    if np.any(mask):
+                        # On extrait la valeur moyenne en dB pour cette bande de fréquences
+                        val_in = np.mean(fft_in[mask])
+                        val_out = np.mean(fft_out[mask])
+                        
+                        # Matplotlib gère la hauteur des barres via set_height.
+                        # Comme l'axe commence à -60, la hauteur de la barre est (valeur_dB - (-60))
+                        self.bars_in[i].set_height(max(0, val_in - (-60)))
+                        self.bars_out[i].set_height(max(0, val_out - (-60)))
+                    else:
+                        self.bars_in[i].set_height(0)
+                        self.bars_out[i].set_height(0)
+                
+                self.canvas.draw_idle()
+        else:
+            # Si aucune lecture en cours, on réinitialise la hauteur de toutes les barres à 0
+            if self.bars_in[0].get_height() > 0 or self.bars_out[0].get_height() > 0:
+                for i in range(self.num_bands):
+                    self.bars_in[i].set_height(0)
+                    self.bars_out[i].set_height(0)
+                self.canvas.draw_idle()
+
+        # Rappeler cette méthode toutes les 30 millisecondes
+        self.after(100, self.update_live_fft)
 
     def toggle_playback(self):
         if not self.file_path:
