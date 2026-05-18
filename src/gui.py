@@ -4,6 +4,11 @@ import customtkinter as ctk
 from audio_engine import AudioEngine
 from tkinter import filedialog
 import os
+import numpy as np
+
+# Imports nécessaires pour Matplotlib dans Tkinter
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # Forcer le mode sombre globalement
 ctk.set_appearance_mode("Dark")
@@ -15,16 +20,13 @@ class AudioVisualApp(ctk.CTk):
         self.engine = AudioEngine()
 
         self.title("Application de filtrage numérique")
-        self.geometry("1100x600")
+        self.geometry("1100x750") # Augmentation de la hauteur pour le graphique
 
         self.is_playing = False
         self.file_path = None
-
-        # Dictionnaire pour stocker l'état des filtres (activé/fréquence)
-        # Utile pour faire le lien avec audio_engine.py
         self.filters_state = {}
 
-        # Configuration de la grille
+        # Configuration de la grille principale
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
@@ -53,13 +55,21 @@ class AudioVisualApp(ctk.CTk):
         self.volume_slider.set(1)
         self.volume_slider.pack(pady=10, padx=20)
 
-        # --- Zone Centrale : Filtres ---
-        self.filter_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        self.filter_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=10)
+        # --- Zone Centrale : Conteneur global ---
+        self.main_content = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.main_content.grid(row=0, column=1, sticky="nsew", padx=20, pady=10)
+        
+        # Configuration interne du contenu principal
+        self.main_content.grid_rowconfigure(1, weight=1) # Le graphique prendra l'espace libre
+        self.main_content.grid_columnconfigure(0, weight=1)
+
+        # --- Zone Centrale Haut : Réglages des Filtres ---
+        self.filter_frame = ctk.CTkFrame(self.main_content, fg_color="transparent")
+        self.filter_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
 
         self.filter_frame_title = ctk.CTkLabel(self.filter_frame, text="RÉGLAGES DES FILTRES",
-                                               font=ctk.CTkFont(size=22, weight="bold"))
-        self.filter_frame_title.pack(pady=(20, 30))
+                                               font=ctk.CTkFont(size=20, weight="bold"))
+        self.filter_frame_title.pack(pady=(10, 15))
 
         filters_config = [
             ("Passe-Bas Ordre 1", 500),
@@ -73,6 +83,36 @@ class AudioVisualApp(ctk.CTk):
         for name, default_val in filters_config:
             self.add_filter_row(name, default_val)
 
+        # --- Zone Centrale Bas : Graphique Matplotlib ---
+        self.plot_frame = ctk.CTkFrame(self.main_content, fg_color="#242424") # Fond sombre assorti
+        self.plot_frame.grid(row=1, column=0, sticky="nsew", pady=10)
+
+        # Initialisation de la Figure Matplotlib avec un style sombre
+        plt.style.use('dark_background')
+        self.fig, self.ax = plt.subplots(figsize=(6, 3), dpi=100)
+        self.fig.patch.set_facecolor('#242424')
+        self.ax.set_facecolor('#1e1e1e')
+        
+        # Configuration initiale des axes
+        self.ax.set_title("Réponse en fréquence globale (Bode)", fontsize=11, color="white")
+        self.ax.set_xlabel("Fréquence (Hz)", fontsize=9, color="darkgray")
+        self.ax.set_ylabel("Gain (dB)", fontsize=9, color="darkgray")
+        self.ax.set_xscale('log')
+        self.ax.set_xlim(20, 20000)
+        self.ax.set_ylim(-40, 5)
+        self.ax.grid(True, which="both", ls="-", color="#333333")
+        self.fig.tight_layout()
+
+        # Ligne vide qui sera mise à jour
+        self.line, = self.ax.plot([], [], color="#2ecc71", lw=2)
+
+        # Intégration de la figure dans CustomTkinter
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_frame)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Premier rendu du graphique
+        self.update_plot()
+
     def import_file(self):
         file_selected = filedialog.askopenfilename(
             title="Sélectionner un fichier audio",
@@ -84,15 +124,14 @@ class AudioVisualApp(ctk.CTk):
             self.engine.load_file(file_selected)
             file_name = os.path.basename(file_selected)
             self.file_label.configure(text=f"Chargé : {file_name}", text_color="#2ecc71")
+            self.update_plot() # Recalculer si la fréquence d'échantillonnage change
 
     def add_filter_row(self, name, default_val):
         row_frame = ctk.CTkFrame(self.filter_frame)
-        row_frame.pack(fill="x", pady=5, padx=10)
+        row_frame.pack(fill="x", pady=3, padx=10)
 
-        # État initial pour ce filtre
         self.filters_state[name] = {"active": False, "freq": default_val}
 
-        # Checkbox pour activer/désactiver le filtre
         check = ctk.CTkCheckBox(row_frame, text=name, width=180, font=ctk.CTkFont(weight="bold"),
                                 command=lambda n=name: self.toggle_filter(n))
         check.pack(side="left", padx=10)
@@ -112,28 +151,23 @@ class AudioVisualApp(ctk.CTk):
         slider.set(default_val)
         slider.pack(side="right", padx=20)
 
-        # Lien entre l'entrée texte et le slider
         val_var.trace_add("write", lambda *args, s=slider, ev=val_var, n=name: self.update_slider_from_entry(n, s, ev))
 
     def toggle_filter(self, name):
-        """Active ou désactive un filtre dans le moteur audio"""
         is_active = self.filters_state[name]["checkbox"].get()
         self.filters_state[name]["active"] = bool(is_active)
-        # Appel vers audio_engine (à implémenter dans audio_engine.py)
         self.engine.update_filter_status(name, is_active)
-        print(f"Filtre {name}: {'ON' if is_active else 'OFF'}")
+        self.update_plot() # <--- Mise à jour ici !
 
     def update_filter_freq(self, name, value, entry_var):
-        """Met à jour la fréquence via le slider"""
         freq = int(value)
         self.filters_state[name]["freq"] = freq
         if entry_var.get() != str(freq):
             entry_var.set(str(freq))
-        # Appel vers audio_engine
         self.engine.set_filter_freq(name, freq)
+        self.update_plot() # <--- Mise à jour ici !
 
     def update_slider_from_entry(self, name, slider, entry_var):
-        """Met à jour le slider et l'état via l'entrée texte"""
         try:
             content = entry_var.get()
             if content == "": return
@@ -142,8 +176,19 @@ class AudioVisualApp(ctk.CTk):
                 slider.set(value)
                 self.filters_state[name]["freq"] = value
                 self.engine.set_filter_freq(name, value)
+                self.update_plot() # <--- Mise à jour ici !
         except ValueError:
             pass
+
+    def update_plot(self):
+        """Récupère les données de réponse fréquentielle du moteur et met à jour le tracé."""
+        frequencies, db_response = self.engine.compute_global_response()
+        
+        # Mise à jour rapide des données de la ligne sans reconstruire tout l'axe
+        self.line.set_data(frequencies, db_response)
+        
+        # Forcer Matplotlib à redessiner le canvas
+        self.canvas.draw_idle()
 
     def toggle_playback(self):
         if not self.file_path:

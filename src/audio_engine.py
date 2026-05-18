@@ -112,3 +112,33 @@ class AudioEngine:
         if self.stream:
             self.stream.stop()
             self.stream.close()
+
+    def compute_global_response(self, worN=512):
+        """
+        Calcule la réponse en fréquence globale cumulée de tous les filtres actifs.
+        Retourne (w, amplitude_db) où w est la fréquence en Hz.
+        """
+        # Fréquences d'évaluation (de 20 Hz à Nyquist)
+        w_hz = np.logspace(np.log10(20), np.log10(self.fs / 2 - 1), worN)
+        # Conversion en radians/échantillon pour scipy
+        w_rad = 2 * np.pi * w_hz / self.fs
+        
+        # Initialisation de la réponse globale à 1 (0 dB partout)
+        h_total = np.ones(worN, dtype=complex)
+        
+        has_active_filter = False
+        
+        for name, info in self.filters.items():
+            if info["active"] and info["sos"] is not None:
+                has_active_filter = True
+                # Calcul de la réponse pour le filtre SOS actuel
+                _, h = signal.sosfreqz(info["sos"], worN=w_rad)
+                h_total *= h
+                
+        if not has_active_filter:
+            # Si aucun filtre n'est coché, on renvoie une ligne plate à 0 dB
+            return w_hz, np.zeros(worN)
+            
+        # Conversion en décibels, avec une sécurité pour éviter le log(0)
+        amplitude_db = 20 * np.log10(np.maximum(np.abs(h_total), 1e-5))
+        return w_hz, amplitude_db
