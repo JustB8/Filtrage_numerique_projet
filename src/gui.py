@@ -17,12 +17,14 @@ class AudioVisualApp(ctk.CTk):
         super().__init__()
         self.engine = AudioEngine()
 
-        self.title("Application de filtrage numérique")
+        self.title("Filtreur 3000")
         self.geometry("1150x880") # Légèrement agrandi en hauteur pour le nouveau menu
 
         self.is_playing = False
         self.file_path = None
         self.filters_state = {}
+
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         # Configuration de la grille principale
         self.grid_columnconfigure(1, weight=1)
@@ -279,6 +281,10 @@ class AudioVisualApp(ctk.CTk):
     def update_volume_label(self, value):
         self.volume_label.configure(text=f"Volume : {int(value * 100)}%")
         self.engine.volume = float(value)
+
+    def on_closing(self):
+        self.engine.stop()  # Coupe proprement le flux sounddevice
+        self.destroy()      # Ferme la fenêtre Tkinter
 
 if __name__ == "__main__":
     app = AudioVisualApp()
