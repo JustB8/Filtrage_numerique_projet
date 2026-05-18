@@ -19,14 +19,14 @@ class AudioEngine:
         self.current_chunk_in = None
         self.current_chunk_out = None
 
-        # Configuration des filtres
+        # Configuration des filtres (Ordre 2 devient d'ordre variable, initialisé à 2)
         self.filters = {
-            "Passe-Bas Ordre 1": {"active": False, "freq": 500, "sos": None, "zi": None},
-            "Passe-Haut Ordre 1": {"active": False, "freq": 1000, "sos": None, "zi": None},
-            "Passe-Bas Ordre 2": {"active": False, "freq": 500, "sos": None, "zi": None},
-            "Passe-Haut Ordre 2": {"active": False, "freq": 1000, "sos": None, "zi": None},
-            "Sélecteur (Bandpass)": {"active": False, "freq": 2500, "sos": None, "zi": None},
-            "Réjecteur (Notch)": {"active": False, "freq": 5000, "sos": None, "zi": None}
+            "Passe-Bas Ordre 1": {"active": False, "freq": 1500, "sos": None, "zi": None},
+            "Passe-Haut Ordre 1": {"active": False, "freq": 1500, "sos": None, "zi": None},
+            "Passe-Bas Variable": {"active": False, "freq": 1500, "order": 2, "sos": None, "zi": None},
+            "Passe-Haut Variable": {"active": False, "freq": 1500, "order": 2, "sos": None, "zi": None},
+            "Sélecteur (Bandpass)": {"active": False, "freq": 1500, "sos": None, "zi": None},
+            "Réjecteur (Notch)": {"active": False, "freq": 1500, "sos": None, "zi": None}
         }
 
     def load_file(self, file_path):
@@ -48,9 +48,11 @@ class AudioEngine:
             if "Ordre 1" in name:
                 btype = 'low' if 'Bas' in name else 'high'
                 self.filters[name]["sos"] = signal.butter(1, f, btype, fs=self.fs, output='sos')
-            elif "Ordre 2" in name:
+            elif "Variable" in name:
                 btype = 'low' if 'Bas' in name else 'high'
-                self.filters[name]["sos"] = signal.butter(2, f, btype, fs=self.fs, output='sos')
+                # Récupération de l'ordre choisi par l'utilisateur (sécurité min 1)
+                order = max(1, self.filters[name].get("order", 2))
+                self.filters[name]["sos"] = signal.butter(order, f, btype, fs=self.fs, output='sos')
             elif "Bandpass" in name:
                 self.filters[name]["sos"] = signal.butter(2, [f * 0.8, min(f * 1.2, self.fs / 2 - 1)], btype='bandpass', fs=self.fs, output='sos')
             elif "Notch" in name:
@@ -66,13 +68,18 @@ class AudioEngine:
     def update_filter_status(self, name, is_active):
         if name in self.filters:
             self.filters[name]["active"] = is_active
-            # Si on active, on s'assure que le SOS est prêt
             if is_active:
                 self._compute_sos(name)
 
     def set_filter_freq(self, name, freq):
         if name in self.filters:
             self.filters[name]["freq"] = freq
+            self._compute_sos(name)
+
+    def set_filter_order(self, name, order):
+        """Permet de modifier l'ordre des filtres configurables"""
+        if name in self.filters and "Variable" in name:
+            self.filters[name]["order"] = order
             self._compute_sos(name)
 
     def callback(self, outdata, frames, time, status):
@@ -82,48 +89,40 @@ class AudioEngine:
             self.current_chunk_out = None
             return
 
+        # 1. On calcule ce qu'il reste dans le fichier pour ce bloc
         chunksize = min(len(self.data) - self.current_frame, frames)
-        # On travaille sur une copie pour ne pas modifier le fichier original
         samples = self.data[self.current_frame: self.current_frame + chunksize].copy()
 
-        # Sauvegarde du signal d'entrée (stéréo -> mix mono pour la FFT)
-        if chunksize > 0:
-            self.current_chunk_in = np.mean(samples, axis=1)
-        else:
-            self.current_chunk_in = None
-
-        # Application des filtres actifs en cascade
-        for name, info in self.filters.items():
-            if info["active"] and info["sos"] is not None:
-                # Utilisation de zi pour la continuité du flux
-                samples, info["zi"] = signal.sosfilt(info["sos"], samples, axis=0, zi=info["zi"])
-
-        # Sauvegarde du signal filtré (mix mono) avant application du volume global
-        if chunksize > 0:
-            self.current_chunk_out = np.mean(samples, axis=1)
-        else:
-            self.current_chunk_out = None
-
-        outdata[:chunksize] = samples * self.volume
-
+        # 2. GESTION DE LA BOUCLE IMMÉDIATE : Si le morceau se termine, on comble le vide tout de suite
         if chunksize < frames:
-            # 1. On réinitialise le curseur de lecture au début du morceau
-            self.current_frame = 0
-            
-            # 2. On calcule combien d'échantillons il manque pour compléter le bloc (le "buffer")
             missing_frames = frames - chunksize
-            
-            # 3. On prend le début du morceau pour combler le vide
             loop_samples = self.data[0:missing_frames].copy()
             
-            # 4. On fusionne la fin et le début du morceau pour avoir un bloc complet
-            samples = np.vstack((samples, loop_samples))
-            
-            # 5. On met à jour le curseur pour le prochain coup de callback
+            # Si samples est vide (chunksize=0), on prend juste le début du morceau
+            if chunksize == 0:
+                samples = loop_samples
+            else:
+                samples = np.vstack((samples, loop_samples))
+                
             self.current_frame = missing_frames
         else:
-            # Avancement normal si on n'est pas à la fin du fichier
             self.current_frame += chunksize
+
+        # À ce stade, 'samples' a TOUJOURS la taille exacte demandée ('frames'), fini les tableaux vides !
+
+        # 3. Sauvegarde du signal d'entrée (mix mono pour la FFT)
+        self.current_chunk_in = np.mean(samples, axis=1)
+
+        # 4. Application des filtres actifs en cascade
+        for name, info in self.filters.items():
+            if info["active"] and info["sos"] is not None:
+                samples, info["zi"] = signal.sosfilt(info["sos"], samples, axis=0, zi=info["zi"])
+
+        # 5. Sauvegarde du signal filtré (mix mono)
+        self.current_chunk_out = np.mean(samples, axis=1)
+
+        # 6. Écriture dans la carte son avec gestion du volume
+        outdata[:] = samples * self.volume
 
     def start(self):
         if self.data is not None:
@@ -146,10 +145,6 @@ class AudioEngine:
             self.stream.close()
 
     def compute_global_response(self, worN=512):
-        """
-        Calcule la réponse en fréquence globale cumulée de tous les filtres actifs.
-        Retourne (w, amplitude_db) où w est la fréquence en Hz.
-        """
         w_hz = np.logspace(np.log10(20), np.log10(self.fs / 2 - 1), worN)
         w_rad = 2 * np.pi * w_hz / self.fs
         h_total = np.ones(worN, dtype=complex)
@@ -168,24 +163,16 @@ class AudioEngine:
         return w_hz, amplitude_db
 
     def get_fft_data(self):
-        """
-        Calcule la FFT des blocs audio d'entrée et de sortie courants.
-        Retourne (freqs, fft_in_db, fft_out_db)
-        """
-        # Si pas de données ou moteur arrêté, on renvoie des tableaux vides
         if self.current_chunk_in is None or self.current_chunk_out is None or len(self.current_chunk_in) < 128:
             return None, None, None
 
         n = len(self.current_chunk_in)
-        # Application d'une fenêtre de Hanning pour éviter le repliement spectral
         window = np.hanning(n)
         
-        # Calcul des FFT
         fft_in = np.fft.rfft(self.current_chunk_in * window)
         fft_out = np.fft.rfft(self.current_chunk_out * window)
         freqs = np.fft.rfftfreq(n, d=1/self.fs)
 
-        # Conversion en dB avec seuil de sécurité
         fft_in_db = 20 * np.log10(np.maximum(np.abs(fft_in), 1e-5))
         fft_out_db = 20 * np.log10(np.maximum(np.abs(fft_out), 1e-5))
 

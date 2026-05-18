@@ -6,11 +6,9 @@ from tkinter import filedialog
 import os
 import numpy as np
 
-# Imports nécessaires pour Matplotlib dans Tkinter
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# Forcer le mode sombre globalement
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
@@ -20,7 +18,7 @@ class AudioVisualApp(ctk.CTk):
         self.engine = AudioEngine()
 
         self.title("Application de filtrage numérique")
-        self.geometry("1100x850") 
+        self.geometry("1150x850") # Légèrement élargi pour accueillir la colonne "Ordre"
 
         self.is_playing = False
         self.file_path = None
@@ -70,13 +68,14 @@ class AudioVisualApp(ctk.CTk):
                                                font=ctk.CTkFont(size=20, weight="bold"))
         self.filter_frame_title.pack(pady=(10, 15))
 
+        # Remplacement des filtres fixes d'ordre 2 par des versions Variables
         filters_config = [
-            ("Passe-Bas Ordre 1", 5000),
-            ("Passe-Haut Ordre 1", 5000),
-            ("Passe-Bas Ordre 2", 5000),
-            ("Passe-Haut Ordre 2", 5000),
-            ("Sélecteur (Bandpass)", 5000),
-            ("Réjecteur (Notch)", 5000)
+            ("Passe-Bas Ordre 1", 1500),
+            ("Passe-Haut Ordre 1", 1500),
+            ("Passe-Bas Variable", 1500),
+            ("Passe-Haut Variable", 1500),
+            ("Sélecteur (Bandpass)", 1500),
+            ("Réjecteur (Notch)", 1500)
         ]
 
         for name, default_val in filters_config:
@@ -90,7 +89,6 @@ class AudioVisualApp(ctk.CTk):
         self.fig, (self.ax_bode, self.ax_fft) = plt.subplots(2, 1, figsize=(6, 5), dpi=100)
         self.fig.patch.set_facecolor('#242424')
         
-        # 1. Configuration de l'axe de la Réponse Fréquentielle (Bode)
         self.ax_bode.set_facecolor('#1e1e1e')
         self.ax_bode.set_title("Réponse en fréquence globale (Bode)", fontsize=11, color="white")
         self.ax_bode.set_ylabel("Gain (dB)", fontsize=9, color="darkgray")
@@ -100,29 +98,23 @@ class AudioVisualApp(ctk.CTk):
         self.ax_bode.grid(True, which="both", ls="-", color="#333333")
         self.line_bode, = self.ax_bode.plot([], [], color="#2ecc71", lw=2)
 
-        # 2. Configuration de l'axe du Spectre en BARRES
-        self.num_bands = 128  # Nombre de barres d'égaliseur pour l'affichage
+        self.num_bands = 128  
         self.ax_fft.set_facecolor('#1e1e1e')
         self.ax_fft.set_title("Spectre de l'audio (Bandes de fréquences)", fontsize=11, color="white")
         self.ax_fft.set_xlabel("Fréquence (Hz) - Échelle Log", fontsize=9, color="darkgray")
         self.ax_fft.set_ylabel("Amplitude (dB)", fontsize=9, color="darkgray")
         self.ax_fft.set_xscale('log')
         self.ax_fft.set_xlim(20, 20000)
-        
-        # AJUSTEMENT : Hausse de la limite à +20 dB pour voir les amplitudes les plus hautes sans coupure
         self.ax_fft.set_ylim(-60, 60) 
         self.ax_fft.grid(True, which="both", ls="-", color="#333333")
         
-        # Génération de fréquences initiales espacées de manière logarithmique pour positionner les barres
         self.bar_freqs = np.logspace(np.log10(20), np.log10(20000), self.num_bands)
-        # Calcul de largeurs proportionnelles à l'échelle logarithmique pour éviter que les barres s'entremêlent
         widths = self.bar_freqs * 0.05 
 
-        # Initialisation des containers de barres (Placées à la valeur plancher de -60 dB)
         self.bars_in = self.ax_fft.bar(self.bar_freqs, np.zeros(self.num_bands), width=widths, 
-                                       color="#e74c3c", alpha=0.6, label="Original (Gabarit)", bottom=-60)
+                                       color="#e74c3c", alpha=0.6, label="Original", bottom=-60)
         self.bars_out = self.ax_fft.bar(self.bar_freqs, np.zeros(self.num_bands), width=widths, 
-                                        color="#3498db", alpha=0.7, label="Modifié", bottom=-60)
+                                        color="#3498db", alpha=0.7, label="Filtré", bottom=-60)
         self.ax_fft.legend(loc="upper right", fontsize=8, framealpha=0.5)
 
         self.fig.tight_layout()
@@ -156,6 +148,19 @@ class AudioVisualApp(ctk.CTk):
         check.pack(side="left", padx=10)
         self.filters_state[name]["checkbox"] = check
 
+        # --- AJOUT : Encadré d'ordre dynamique pour les filtres Variables ---
+        if "Variable" in name:
+            order_label = ctk.CTkLabel(row_frame, text="Ordre :", font=ctk.CTkFont(size=11, weight="bold"))
+            order_label.pack(side="left", padx=(10, 2))
+            
+            order_var = ctk.StringVar(value="2")
+            order_entry = ctk.CTkEntry(row_frame, width=35, textvariable=order_var, justify="center")
+            order_entry.pack(side="left", padx=2)
+            
+            # Suivi en temps réel des changements d'ordre
+            order_var.trace_add("write", lambda *args, n=name, ov=order_var: self.update_filter_order(n, ov))
+
+        # Fréquence en Hz
         unit_label = ctk.CTkLabel(row_frame, text="Hz")
         unit_label.pack(side="right", padx=10)
 
@@ -164,7 +169,7 @@ class AudioVisualApp(ctk.CTk):
         entry.pack(side="right", padx=10)
 
         slider = ctk.CTkSlider(
-            row_frame, from_=20, to=20000, width=400,
+            row_frame, from_=20, to=20000, width=350,  # Légèrement réduit pour laisser de la place à l'ordre
             command=lambda v, n=name, ev=val_var: self.update_filter_freq(n, v, ev)
         )
         slider.set(default_val)
@@ -186,6 +191,19 @@ class AudioVisualApp(ctk.CTk):
         self.engine.set_filter_freq(name, freq)
         self.update_bode_plot()
 
+    def update_filter_order(self, name, order_var):
+        """Met à jour l'ordre du filtre dans le moteur audio lors de la saisie utilisateur."""
+        try:
+            content = order_var.get()
+            if content == "": return
+            order_val = int(content)
+            # Sécurité pour éviter de faire planter scipy (ex: ordre entre 1 et 12)
+            if 1 <= order_val <= 12:
+                self.engine.set_filter_order(name, order_val)
+                self.update_bode_plot()
+        except ValueError:
+            pass # Ignore les caractères invalides temporaires pendant la saisie
+
     def update_slider_from_entry(self, name, slider, entry_var):
         try:
             content = entry_var.get()
@@ -205,24 +223,18 @@ class AudioVisualApp(ctk.CTk):
         self.canvas.draw_idle()
 
     def update_live_fft(self):
-        """Boucle de rafraîchissement appliquant le traitement par barres."""
         if self.engine.is_playing:
             freqs, fft_in, fft_out = self.engine.get_fft_data()
             
             if freqs is not None:
-                # Regroupement des données FFT linéaires dans nos 64 bandes logarithmiques
-                # Permet de calculer la moyenne d'énergie par bande pour l'affichage en barres
                 indices = np.digitize(freqs, self.bar_freqs)
                 
                 for i in range(self.num_bands):
                     mask = (indices == i)
                     if np.any(mask):
-                        # On extrait la valeur moyenne en dB pour cette bande de fréquences
                         val_in = np.mean(fft_in[mask])
                         val_out = np.mean(fft_out[mask])
                         
-                        # Matplotlib gère la hauteur des barres via set_height.
-                        # Comme l'axe commence à -60, la hauteur de la barre est (valeur_dB - (-60))
                         self.bars_in[i].set_height(max(0, val_in - (-60)))
                         self.bars_out[i].set_height(max(0, val_out - (-60)))
                     else:
@@ -231,14 +243,12 @@ class AudioVisualApp(ctk.CTk):
                 
                 self.canvas.draw_idle()
         else:
-            # Si aucune lecture en cours, on réinitialise la hauteur de toutes les barres à 0
             if self.bars_in[0].get_height() > 0 or self.bars_out[0].get_height() > 0:
                 for i in range(self.num_bands):
                     self.bars_in[i].set_height(0)
                     self.bars_out[i].set_height(0)
                 self.canvas.draw_idle()
 
-        # Rappeler cette méthode toutes les 30 millisecondes
         self.after(100, self.update_live_fft)
 
     def toggle_playback(self):
