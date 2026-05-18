@@ -61,7 +61,7 @@ class AudioVisualApp(ctk.CTk):
         
         self.type_menu = ctk.CTkOptionMenu(
             self.sidebar, 
-            values=["Butterworth", "Chebyshev Type I", "Chebyshev Type II", "Elliptique"],
+            values=["Butterworth", "Tchebychev de type 1", "Tchebychev de type 2", "Elliptique"],
             command=self.change_global_filter_type
         )
         self.type_menu.set("Butterworth")
@@ -84,12 +84,12 @@ class AudioVisualApp(ctk.CTk):
 
         # Remplacement des filtres fixes d'ordre 2 par des versions Variables
         filters_config = [
-            ("Passe-Bas Ordre 1", 1500),
-            ("Passe-Haut Ordre 1", 1500),
-            ("Passe-Bas Variable", 1500),
-            ("Passe-Haut Variable", 1500),
-            ("Sélecteur (Bandpass)", 1500),
-            ("Réjecteur (Notch)", 1500)
+            ("Passe-bas d'ordre 1", 1500),
+            ("Passe-haut d'ordre 1", 1500),
+            ("Passe-bas d'ordre variable", 1500),
+            ("Passe-haut d'ordre variable", 1500),
+            ("Sélecteur", 1500),
+            ("Coupe-bande", 1500)
         ]
 
         for name, default_val in filters_config:
@@ -104,8 +104,9 @@ class AudioVisualApp(ctk.CTk):
         self.fig.patch.set_facecolor('#242424')
         
         self.ax_bode.set_facecolor('#1e1e1e')
-        self.ax_bode.set_title("Réponse en fréquence globale (Bode)", fontsize=11, color="white")
+        self.ax_bode.set_title("Diagramme de Bode", fontsize=11, color="white")
         self.ax_bode.set_ylabel("Gain (dB)", fontsize=9, color="darkgray")
+        self.ax_bode.set_xlabel("Fréquence (Hz)", fontsize=9, color="darkgray")
         self.ax_bode.set_xscale('log')
         self.ax_bode.set_xlim(20, 20000)
         self.ax_bode.set_ylim(-60, 5)
@@ -114,8 +115,8 @@ class AudioVisualApp(ctk.CTk):
 
         self.num_bands = 128  
         self.ax_fft.set_facecolor('#1e1e1e')
-        self.ax_fft.set_title("Spectre de l'audio (Bandes de fréquences)", fontsize=11, color="white")
-        self.ax_fft.set_xlabel("Fréquence (Hz) - Échelle Log", fontsize=9, color="darkgray")
+        self.ax_fft.set_title("Spectre audio", fontsize=11, color="white")
+        self.ax_fft.set_xlabel("Fréquence (Hz)", fontsize=9, color="darkgray")
         self.ax_fft.set_ylabel("Amplitude (dB)", fontsize=9, color="darkgray")
         self.ax_fft.set_xscale('log')
         self.ax_fft.set_xlim(20, 20000)
@@ -162,7 +163,7 @@ class AudioVisualApp(ctk.CTk):
         check.pack(side="left", padx=10)
         self.filters_state[name]["checkbox"] = check
 
-        if "Variable" in name:
+        if "variable" in name:
             order_label = ctk.CTkLabel(row_frame, text="Ordre (2 à 10) :", font=ctk.CTkFont(size=11, weight="bold"))
             order_label.pack(side="left", padx=(10, 2))
             

@@ -23,12 +23,12 @@ class AudioEngine:
 
         # Configuration des filtres
         self.filters = {
-            "Passe-Bas Ordre 1": {"active": False, "freq": 1500, "sos": None, "zi": None},
-            "Passe-Haut Ordre 1": {"active": False, "freq": 1500, "sos": None, "zi": None},
-            "Passe-Bas Variable": {"active": False, "freq": 1500, "order": 2, "sos": None, "zi": None},
-            "Passe-Haut Variable": {"active": False, "freq": 1500, "order": 2, "sos": None, "zi": None},
-            "Sélecteur (Bandpass)": {"active": False, "freq": 1500, "sos": None, "zi": None},
-            "Réjecteur (Notch)": {"active": False, "freq": 1500, "sos": None, "zi": None}
+            "Passe-bas d'ordre 1": {"active": False, "freq": 1500, "sos": None, "zi": None},
+            "Passe-haut d'ordre 1": {"active": False, "freq": 1500, "sos": None, "zi": None},
+            "Passe-bas d'ordre variable": {"active": False, "freq": 1500, "order": 2, "sos": None, "zi": None},
+            "Passe-haut d'ordre variable": {"active": False, "freq": 1500, "order": 2, "sos": None, "zi": None},
+            "Sélecteur": {"active": False, "freq": 1500, "sos": None, "zi": None},
+            "Coupe-bande": {"active": False, "freq": 1500, "sos": None, "zi": None}
         }
 
     def load_file(self, file_path):
@@ -60,31 +60,31 @@ class AudioEngine:
 
         try:
             # Choix de la fonction de conception de Scipy en fonction de self.filter_type
-            if self.filter_type == "Chebyshev Type I":
+            if self.filter_type == "Tchebychev de type 1":
                 filter_func = lambda ord, wn, btype: signal.cheby1(ord, rp, wn, btype, fs=self.fs, output='sos')
-            elif self.filter_type == "Chebyshev Type II":
+            elif self.filter_type == "Tchebychev de type 2":
                 filter_func = lambda ord, wn, btype: signal.cheby2(ord, rs, wn, btype, fs=self.fs, output='sos')
             elif self.filter_type == "Elliptique":
                 filter_func = lambda ord, wn, btype: signal.ellip(ord, rp, rs, wn, btype, fs=self.fs, output='sos')
             else: # Butterworth par défaut
                 filter_func = lambda ord, wn, btype: signal.butter(ord, wn, btype, fs=self.fs, output='sos')
 
-            if "Ordre 1" in name:
-                btype = 'low' if 'Bas' in name else 'high'
+            if "ordre 1" in name:
+                btype = 'low' if 'bas' in name else 'high'
                 # Note: Chebyshev/Elliptique d'ordre 1 avec ces specs équivalent globalement à un Butterworth customisé
                 self.filters[name]["sos"] = filter_func(1, f, btype)
 
-            elif "Variable" in name:
-                btype = 'low' if 'Bas' in name else 'high'
+            elif "variable" in name:
+                btype = 'low' if 'bas' in name else 'high'
                 order = max(1, self.filters[name].get("order", 2))
                 self.filters[name]["sos"] = filter_func(order, f, btype)
 
-            elif "Bandpass" in name:
+            elif "Sélecteur" in name:
                 # Pour un Bandpass, l'ordre Scipy génère un filtre d'ordre 2*N (ici N=2 -> Ordre global 4)
                 f_band = [f * 0.8, min(f * 1.2, self.fs / 2 - 1)]
                 self.filters[name]["sos"] = filter_func(2, f_band, btype='bandpass')
 
-            elif "Notch" in name:
+            elif "Coupe-bande" in name:
                 # Le Notch (coupe-bande étroit IIR) utilise une structure dédiée indépendante du type global
                 b, a = signal.iirnotch(f, 30.0, fs=self.fs)
                 self.filters[name]["sos"] = signal.tf2sos(b, a)
