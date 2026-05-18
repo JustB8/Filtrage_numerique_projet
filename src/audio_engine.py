@@ -5,7 +5,6 @@ import soundfile as sf
 import numpy as np
 from scipy import signal
 
-
 class AudioEngine:
     def __init__(self):
         self.data = None
@@ -15,11 +14,14 @@ class AudioEngine:
         self.volume = 1.0
         self.is_playing = False
 
+        # Type de filtre global (Butterworth par défaut)
+        self.filter_type = "Butterworth"
+
         # Variables pour l'analyse spectrale en temps réel
         self.current_chunk_in = None
         self.current_chunk_out = None
 
-        # Configuration des filtres (Ordre 2 devient d'ordre variable, initialisé à 2)
+        # Configuration des filtres
         self.filters = {
             "Passe-Bas Ordre 1": {"active": False, "freq": 1500, "sos": None, "zi": None},
             "Passe-Haut Ordre 1": {"active": False, "freq": 1500, "sos": None, "zi": None},
@@ -34,28 +36,56 @@ class AudioEngine:
         if len(self.data.shape) == 1:
             self.data = np.column_stack((self.data, self.data))
         self.current_frame = 0
-        # Initialiser les coefficients pour tous les filtres avec le nouveau fs
+        self.update_all_filters()
+
+    def set_global_filter_type(self, filter_type):
+        """Change le type d'approximation pour tous les filtres et recalcule."""
+        self.filter_type = filter_type
+        self.update_all_filters()
+
+    def update_all_filters(self):
+        """Recalcule les SOS pour tous les filtres actifs."""
         for name in self.filters:
-            self._compute_sos(name)
+            if self.filters[name]["active"]:
+                self._compute_sos(name)
 
     def _compute_sos(self, name):
-        """Calcule les coefficients SOS et initialise la mémoire zi."""
+        """Calcule les coefficients SOS selon le type de filtre sélectionné."""
         f = self.filters[name]["freq"]
-        # Protection contre la fréquence de Nyquist
-        f = min(f, self.fs / 2 - 1)
+        f = min(f, self.fs / 2 - 1)  # Protection Nyquist
+
+        # Paramètres standards pour Chebyshev et Elliptique
+        rp = 1.0   # Ondulation max en bande passante (dB)
+        rs = 40.0  # Atténuation min en bande atténuée (dB)
 
         try:
+            # Choix de la fonction de conception de Scipy en fonction de self.filter_type
+            if self.filter_type == "Chebyshev Type I":
+                filter_func = lambda ord, wn, btype: signal.cheby1(ord, rp, wn, btype, fs=self.fs, output='sos')
+            elif self.filter_type == "Chebyshev Type II":
+                filter_func = lambda ord, wn, btype: signal.cheby2(ord, rs, wn, btype, fs=self.fs, output='sos')
+            elif self.filter_type == "Elliptique":
+                filter_func = lambda ord, wn, btype: signal.ellip(ord, rp, rs, wn, btype, fs=self.fs, output='sos')
+            else: # Butterworth par défaut
+                filter_func = lambda ord, wn, btype: signal.butter(ord, wn, btype, fs=self.fs, output='sos')
+
             if "Ordre 1" in name:
                 btype = 'low' if 'Bas' in name else 'high'
-                self.filters[name]["sos"] = signal.butter(1, f, btype, fs=self.fs, output='sos')
+                # Note: Chebyshev/Elliptique d'ordre 1 avec ces specs équivalent globalement à un Butterworth customisé
+                self.filters[name]["sos"] = filter_func(1, f, btype)
+
             elif "Variable" in name:
                 btype = 'low' if 'Bas' in name else 'high'
-                # Récupération de l'ordre choisi par l'utilisateur (sécurité min 1)
                 order = max(1, self.filters[name].get("order", 2))
-                self.filters[name]["sos"] = signal.butter(order, f, btype, fs=self.fs, output='sos')
+                self.filters[name]["sos"] = filter_func(order, f, btype)
+
             elif "Bandpass" in name:
-                self.filters[name]["sos"] = signal.butter(2, [f * 0.8, min(f * 1.2, self.fs / 2 - 1)], btype='bandpass', fs=self.fs, output='sos')
+                # Pour un Bandpass, l'ordre Scipy génère un filtre d'ordre 2*N (ici N=2 -> Ordre global 4)
+                f_band = [f * 0.8, min(f * 1.2, self.fs / 2 - 1)]
+                self.filters[name]["sos"] = filter_func(2, f_band, btype='bandpass')
+
             elif "Notch" in name:
+                # Le Notch (coupe-bande étroit IIR) utilise une structure dédiée indépendante du type global
                 b, a = signal.iirnotch(f, 30.0, fs=self.fs)
                 self.filters[name]["sos"] = signal.tf2sos(b, a)
 
@@ -63,7 +93,7 @@ class AudioEngine:
             zi = signal.sosfilt_zi(self.filters[name]["sos"])
             self.filters[name]["zi"] = np.repeat(zi[:, np.newaxis, :], 2, axis=1)
         except Exception as e:
-            print(f"Erreur calcul {name}: {e}")
+            print(f"Erreur calcul {name} ({self.filter_type}): {e}")
 
     def update_filter_status(self, name, is_active):
         if name in self.filters:
@@ -74,13 +104,14 @@ class AudioEngine:
     def set_filter_freq(self, name, freq):
         if name in self.filters:
             self.filters[name]["freq"] = freq
-            self._compute_sos(name)
+            if self.filters[name]["active"]:
+                self._compute_sos(name)
 
     def set_filter_order(self, name, order):
-        """Permet de modifier l'ordre des filtres configurables"""
         if name in self.filters and "Variable" in name:
             self.filters[name]["order"] = order
-            self._compute_sos(name)
+            if self.filters[name]["active"]:
+                self._compute_sos(name)
 
     def callback(self, outdata, frames, time, status):
         if not self.is_playing or self.data is None:
@@ -89,39 +120,27 @@ class AudioEngine:
             self.current_chunk_out = None
             return
 
-        # 1. On calcule ce qu'il reste dans le fichier pour ce bloc
         chunksize = min(len(self.data) - self.current_frame, frames)
         samples = self.data[self.current_frame: self.current_frame + chunksize].copy()
 
-        # 2. GESTION DE LA BOUCLE IMMÉDIATE : Si le morceau se termine, on comble le vide tout de suite
         if chunksize < frames:
             missing_frames = frames - chunksize
             loop_samples = self.data[0:missing_frames].copy()
-            
-            # Si samples est vide (chunksize=0), on prend juste le début du morceau
             if chunksize == 0:
                 samples = loop_samples
             else:
                 samples = np.vstack((samples, loop_samples))
-                
             self.current_frame = missing_frames
         else:
             self.current_frame += chunksize
 
-        # À ce stade, 'samples' a TOUJOURS la taille exacte demandée ('frames'), fini les tableaux vides !
-
-        # 3. Sauvegarde du signal d'entrée (mix mono pour la FFT)
         self.current_chunk_in = np.mean(samples, axis=1)
 
-        # 4. Application des filtres actifs en cascade
         for name, info in self.filters.items():
             if info["active"] and info["sos"] is not None:
                 samples, info["zi"] = signal.sosfilt(info["sos"], samples, axis=0, zi=info["zi"])
 
-        # 5. Sauvegarde du signal filtré (mix mono)
         self.current_chunk_out = np.mean(samples, axis=1)
-
-        # 6. Écriture dans la carte son avec gestion du volume
         outdata[:] = samples * self.volume
 
     def start(self):

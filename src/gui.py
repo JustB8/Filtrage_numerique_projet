@@ -18,7 +18,7 @@ class AudioVisualApp(ctk.CTk):
         self.engine = AudioEngine()
 
         self.title("Application de filtrage numérique")
-        self.geometry("1150x850") # Légèrement élargi pour accueillir la colonne "Ordre"
+        self.geometry("1150x880") # Légèrement agrandi en hauteur pour le nouveau menu
 
         self.is_playing = False
         self.file_path = None
@@ -35,7 +35,7 @@ class AudioVisualApp(ctk.CTk):
         self.title_label = ctk.CTkLabel(self.sidebar, text="CONTRÔLES", font=ctk.CTkFont(size=20, weight="bold"))
         self.title_label.pack(pady=(20, 10))
 
-        self.file_label = ctk.CTkLabel(self.sidebar, text="Aucun fichier", font=ctk.CTkFont(size=11), wraplength=180)
+        self.file_label = ctk.CTkLabel(self.sidebar, text="Aucun fichier", font=ctk.CTkFont(size=12), wraplength=180)
         self.file_label.pack(pady=(0, 10))
 
         self.import_button = ctk.CTkButton(self.sidebar, text="Importer .wav", command=self.import_file)
@@ -48,10 +48,22 @@ class AudioVisualApp(ctk.CTk):
         self.play_pause_button.pack(pady=10, padx=20)
 
         self.volume_label = ctk.CTkLabel(self.sidebar, text="Volume : 100%")
-        self.volume_label.pack(pady=(30, 0))
+        self.volume_label.pack(pady=(20, 0))
         self.volume_slider = ctk.CTkSlider(self.sidebar, from_=0, to=1, command=self.update_volume_label)
         self.volume_slider.set(1)
         self.volume_slider.pack(pady=10, padx=20)
+
+        # --- AJOUT MULTI-FILTRES : Sélection du type d'approximation globale ---
+        self.type_label = ctk.CTkLabel(self.sidebar, text="TYPE DE FILTRE :", font=ctk.CTkFont(size=12, weight="bold"))
+        self.type_label.pack(pady=(25, 0))
+        
+        self.type_menu = ctk.CTkOptionMenu(
+            self.sidebar, 
+            values=["Butterworth", "Chebyshev Type I", "Chebyshev Type II", "Elliptique"],
+            command=self.change_global_filter_type
+        )
+        self.type_menu.set("Butterworth")
+        self.type_menu.pack(pady=10, padx=20)
 
         # --- Zone Centrale : Conteneur global ---
         self.main_content = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
@@ -94,7 +106,7 @@ class AudioVisualApp(ctk.CTk):
         self.ax_bode.set_ylabel("Gain (dB)", fontsize=9, color="darkgray")
         self.ax_bode.set_xscale('log')
         self.ax_bode.set_xlim(20, 20000)
-        self.ax_bode.set_ylim(-40, 5)
+        self.ax_bode.set_ylim(-60, 5)
         self.ax_bode.grid(True, which="both", ls="-", color="#333333")
         self.line_bode, = self.ax_bode.plot([], [], color="#2ecc71", lw=2)
 
@@ -148,16 +160,14 @@ class AudioVisualApp(ctk.CTk):
         check.pack(side="left", padx=10)
         self.filters_state[name]["checkbox"] = check
 
-        # --- AJOUT : Encadré d'ordre dynamique pour les filtres Variables ---
         if "Variable" in name:
-            order_label = ctk.CTkLabel(row_frame, text="Ordre :", font=ctk.CTkFont(size=11, weight="bold"))
+            order_label = ctk.CTkLabel(row_frame, text="Ordre (2 à 10) :", font=ctk.CTkFont(size=11, weight="bold"))
             order_label.pack(side="left", padx=(10, 2))
             
             order_var = ctk.StringVar(value="2")
             order_entry = ctk.CTkEntry(row_frame, width=35, textvariable=order_var, justify="center")
             order_entry.pack(side="left", padx=2)
             
-            # Suivi en temps réel des changements d'ordre
             order_var.trace_add("write", lambda *args, n=name, ov=order_var: self.update_filter_order(n, ov))
 
         # Fréquence en Hz
@@ -169,13 +179,18 @@ class AudioVisualApp(ctk.CTk):
         entry.pack(side="right", padx=10)
 
         slider = ctk.CTkSlider(
-            row_frame, from_=20, to=20000, width=350,  # Légèrement réduit pour laisser de la place à l'ordre
+            row_frame, from_=20, to=20000, width=350,
             command=lambda v, n=name, ev=val_var: self.update_filter_freq(n, v, ev)
         )
         slider.set(default_val)
         slider.pack(side="right", padx=20)
 
         val_var.trace_add("write", lambda *args, s=slider, ev=val_var, n=name: self.update_slider_from_entry(n, s, ev))
+
+    def change_global_filter_type(self, choice):
+        """Déclenché lors du changement d'approximation globale."""
+        self.engine.set_global_filter_type(choice)
+        self.update_bode_plot()
 
     def toggle_filter(self, name):
         is_active = self.filters_state[name]["checkbox"].get()
@@ -192,17 +207,15 @@ class AudioVisualApp(ctk.CTk):
         self.update_bode_plot()
 
     def update_filter_order(self, name, order_var):
-        """Met à jour l'ordre du filtre dans le moteur audio lors de la saisie utilisateur."""
         try:
             content = order_var.get()
             if content == "": return
             order_val = int(content)
-            # Sécurité pour éviter de faire planter scipy (ex: ordre entre 1 et 12)
             if 1 <= order_val <= 12:
                 self.engine.set_filter_order(name, order_val)
                 self.update_bode_plot()
         except ValueError:
-            pass # Ignore les caractères invalides temporaires pendant la saisie
+            pass
 
     def update_slider_from_entry(self, name, slider, entry_var):
         try:
