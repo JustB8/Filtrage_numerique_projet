@@ -108,7 +108,7 @@ class AudioEngine:
                 self._compute_sos(name)
 
     def set_filter_order(self, name, order):
-        if name in self.filters and "Variable" in name:
+        if name in self.filters and "variable" in name:
             self.filters[name]["order"] = order
             if self.filters[name]["active"]:
                 self._compute_sos(name)
